@@ -4,11 +4,9 @@
 # Installs Filebeat, enables useful modules & filesets,
 # loads dashboards into Kibana, and runs as a systemd service
 #
-# Usage: chmod +x linux-agent-setup.sh && ./linux-agent-setup.sh
-#
 
-ELK_HOST="172.16.10.97"   # <-- CHANGE THIS TO YOUR ELK SERVER (Elasticsearch + Kibana + Logstash)
-ELK_PORT="5044"           # <-- Logstash Beats input port
+ELK_HOST="172.16.10.97"    # <-- CHANGE THIS TO YOUR ELK SERVER (Elasticsearch + Kibana + Logstash)
+ELK_PORT="5044"          # <-- Logstash Beats input port
 
 set -e
 
@@ -33,9 +31,6 @@ filebeat.inputs:
 filebeat.config.modules:
   path: \${path.config}/modules.d/*.yml
   reload.enabled: true
-
-setup.template.settings:
-  index.number_of_shards: 1
 
 # Point Filebeat to Kibana for dashboards
 setup.kibana:
@@ -64,7 +59,7 @@ sed -i 's/enabled: false/enabled: true/' /etc/filebeat/modules.d/nginx.yml || tr
 # Auditd
 sed -i 's/enabled: false/enabled: true/' /etc/filebeat/modules.d/auditd.yml || true
 
-echo "[*] Temporarily switching to Elasticsearch to load dashboards..."
+echo "[*] Temporarily switching to Elasticsearch to load dashboards and templates (FIXING MAPPING ERROR)..."
 # Backup logstash config
 cp /etc/filebeat/filebeat.yml /etc/filebeat/filebeat.yml.logstash
 
@@ -77,8 +72,9 @@ output.elasticsearch:
   hosts: ["http://${ELK_HOST}:9200"]
 EOF
 
-# Setup dashboards
-filebeat setup --dashboards --index-management --pipelines
+# Setup assets: This loads the correct index templates, pipelines, and dashboards
+# for all ENABLED modules, fixing the fielddata/mapping issue for new indices.
+filebeat setup
 
 # Restore Logstash config
 mv /etc/filebeat/filebeat.yml.logstash /etc/filebeat/filebeat.yml
