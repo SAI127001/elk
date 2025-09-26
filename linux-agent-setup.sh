@@ -1,28 +1,29 @@
 #!/bin/bash
 #
-# Ubuntu Filebeat Agent Setup (with Dashboard Fix)
-# Installs Filebeat, enables useful modules & filesets, loads dashboards, and runs as systemd service
+# Ubuntu Filebeat Agent Setup (with Kibana Fix for Dashboards)
+# Installs Filebeat, enables useful modules & filesets,
+# loads dashboards into Kibana, and runs as a systemd service
 #
-# Usage: chmod +x ubuntu-filebeat-agent.sh && ./ubuntu-filebeat-agent.sh
+# Usage: chmod +x linux-agent-setup.sh && ./linux-agent-setup.sh
 #
 
-ELK_HOST="172.16.10.97"   # <-- CHANGE THIS TO YOUR ELK SERVER (Elasticsearch + Logstash)
+ELK_HOST="172.16.10.97"   # <-- CHANGE THIS TO YOUR ELK SERVER (Elasticsearch + Kibana + Logstash)
 ELK_PORT="5044"           # <-- Logstash Beats input port
 
 set -e
 
 echo "[*] Updating system APT repos..."
-sudo apt-get update -y
+apt-get update -y
 
 echo "[*] Downloading and installing Filebeat 8.12.0..."
 curl -L -O https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-8.12.0-amd64.deb
-sudo dpkg -i filebeat-8.12.0-amd64.deb
+dpkg -i filebeat-8.12.0-amd64.deb
 
 echo "[*] Backing up default config..."
-sudo cp /etc/filebeat/filebeat.yml /etc/filebeat/filebeat.yml.bak
+cp /etc/filebeat/filebeat.yml /etc/filebeat/filebeat.yml.bak
 
 echo "[*] Writing Filebeat config (Logstash output)..."
-sudo tee /etc/filebeat/filebeat.yml > /dev/null <<EOF
+tee /etc/filebeat/filebeat.yml > /dev/null <<EOF
 filebeat.inputs:
   - type: log
     enabled: true
@@ -36,6 +37,10 @@ filebeat.config.modules:
 setup.template.settings:
   index.number_of_shards: 1
 
+# Point Filebeat to Kibana for dashboards
+setup.kibana:
+  host: "http://${ELK_HOST}:5601"
+
 output.logstash:
   hosts: ["${ELK_HOST}:${ELK_PORT}"]
 
@@ -47,42 +52,41 @@ processors:
 EOF
 
 echo "[*] Enabling important modules (system, apache, nginx, auditd)..."
-sudo filebeat modules enable system apache nginx auditd
+filebeat modules enable system apache nginx auditd
 
 echo "[*] Enabling default filesets for modules..."
-
-# Enable filesets for system module
-sudo sed -i 's/enabled: false/enabled: true/' /etc/filebeat/modules.d/system.yml || true
-
-# Enable filesets for apache module
-sudo sed -i 's/enabled: false/enabled: true/' /etc/filebeat/modules.d/apache.yml || true
-
-# Enable filesets for nginx module
-sudo sed -i 's/enabled: false/enabled: true/' /etc/filebeat/modules.d/nginx.yml || true
-
-# Enable filesets for auditd module
-sudo sed -i 's/enabled: false/enabled: true/' /etc/filebeat/modules.d/auditd.yml || true
+# System
+sed -i 's/enabled: false/enabled: true/' /etc/filebeat/modules.d/system.yml || true
+# Apache
+sed -i 's/enabled: false/enabled: true/' /etc/filebeat/modules.d/apache.yml || true
+# Nginx
+sed -i 's/enabled: false/enabled: true/' /etc/filebeat/modules.d/nginx.yml || true
+# Auditd
+sed -i 's/enabled: false/enabled: true/' /etc/filebeat/modules.d/auditd.yml || true
 
 echo "[*] Temporarily switching to Elasticsearch to load dashboards..."
 # Backup logstash config
-sudo cp /etc/filebeat/filebeat.yml /etc/filebeat/filebeat.yml.logstash
+cp /etc/filebeat/filebeat.yml /etc/filebeat/filebeat.yml.logstash
 
-# Minimal ES config
-sudo tee /etc/filebeat/filebeat.yml > /dev/null <<EOF
+# Minimal ES config (with Kibana)
+tee /etc/filebeat/filebeat.yml > /dev/null <<EOF
+setup.kibana:
+  host: "http://${ELK_HOST}:5601"
+
 output.elasticsearch:
   hosts: ["http://${ELK_HOST}:9200"]
 EOF
 
 # Setup dashboards
-sudo filebeat setup --dashboards
+filebeat setup --dashboards --index-management --pipelines
 
 # Restore Logstash config
-sudo mv /etc/filebeat/filebeat.yml.logstash /etc/filebeat/filebeat.yml
+mv /etc/filebeat/filebeat.yml.logstash /etc/filebeat/filebeat.yml
 
 echo "[*] Enabling and starting Filebeat in systemd..."
-sudo systemctl enable filebeat
-sudo systemctl restart filebeat
+systemctl enable filebeat
+systemctl restart filebeat
 
 echo "✅ Filebeat agent installed and running on Ubuntu."
 echo "👉 Logs are being shipped to Logstash at ${ELK_HOST}:${ELK_PORT}."
-echo "📊 Dashboards successfully imported into Kibana (http://${ELK_HOST}:5601)."
+echo "📊 Dashboards should now be visible in Kibana (http://${ELK_HOST}:5601)."
